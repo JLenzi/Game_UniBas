@@ -15,25 +15,30 @@ contract Game {
         * Allow multiple attacks for each player. This will incentivice cascade or bubble scenarios, and it will be interesting to analyse the strategies of players 
     */
     
-    uint public costOfAttack   = 1 ether;               // Cost of attacking, will keep in the jackpot for next rounds ie: guarantees that jackpot never empty for future rounds
-    uint public minimumAttack  = 1 ether;               // Minimum bet allowed
-    uint minimumTheta          = 20;                    // Percentage of needed players to execute a successful attack
-    uint public minimumPlayers = 1;                     // minimum amount of players needed to play 
-    uint private Confirmed     = 0;                     // Players that have already confirmed
-    uint public nbPlayers      = 0;                     // Number of Players is zero at the beginning
-    uint public jackpot        = address(this).balance; // Remaining funds
-    uint private nbAttackers   = 0;                     // Counts the attacks
-    uint private unknownSeed   = 0;                     // Provides a seed for the random number  
-    uint private totalBets     = 0;                     // Adds the bets of all attackers
-    uint256 private T0         = 100000000000000;       // Aprox. time when minimum amount of players have commited plus the waiting time
-    uint256 private T1         = 100000000000000;       // Aprox. time when minimum amount of players have commited plus the confirmation time  
-    uint256 private dt         = 10 seconds;            // Waiting time, time available to add new players even though the minimum amount of players already commited
-    uint256 private dt2        = 300 seconds;           // Time given to Confirm (usefull to stop stalling scenarios, makes sure the system changes if some player thinks it is stalled by confirming again)
-    uint private Theta         = 101;                   // The fundamental, "Resistance of the system" ie: Percentage of attackers needed to have a succesfull attack
+    uint public costOfAttack     = 1 ether;               // Cost of attacking, will keep in the jackpot for next rounds ie: guarantees that jackpot never empty for future rounds
+    uint public minimumAttack    = 1 ether;               // Minimum bet allowed
+    uint minimumTheta            = 20;                    // Percentage of needed players to execute a successful attack
+    uint public minimumPlayers   = 5;                     // minimum amount of players needed to play 
+    uint private Confirmed       = 0;                     // Players that have already confirmed
+    uint public nbPlayers        = 0;                     // Number of Players is zero at the beginning
+    uint public jackpot          = address(this).balance; // Remaining funds
+    uint private nbAttackers     = 0;                     // Counts the attacks
+    uint private unknownSeed     = 0;                     // Provides a seed for the random number  
+    uint private totalBets       = 0;                     // Adds the bets of all attackers
+    uint256 private T0           = 100000000000000;       // Aprox. time when minimum amount of players have commited plus the waiting time
+    uint256 private T1           = 100000000000000;       // Aprox. time when minimum amount of players have commited plus the confirmation time  
+    uint256 private dt           = 10 seconds;            // Waiting time, time available to add new players even though the minimum amount of players already commited
+    uint256 private dt2          = 300 seconds;           // Time given to Confirm (usefull to stop stalling scenarios, makes sure the system changes if some player thinks it is stalled by confirming again)
+    uint private Theta           = 101;                   // The fundamental, "Resistance of the system" ie: Percentage of attackers needed to have a succesfull attack
+    uint public lastTheta        = 101;                   // Last Theta
+    address payable public owner = msg.sender;
     
-    
-    modifier betHigherThanMinimumAttack{              // Requirement needed for playing (player's bet or "lie bet" must be higher than the minimum allowed)  
+    modifier betHigherThanMinimumAttack {               // Requirement needed for playing (player's bet or "lie bet" must be higher than the minimum allowed)  
         require(msg.value >= minimumAttack);
+        _;
+    }  
+    modifier onlyOwner {                                //  
+        require(msg.sender == owner);
         _;
     } 
     
@@ -63,7 +68,6 @@ contract Game {
     }
 
     function AA_CommitDecision(bytes32 _hashedBetDecisionPw) public payable betHigherThanMinimumAttack {  
-        //jackpot = address(this).balance;                         // Actualize jackpot
         if(state == State.Active || state == State.Waiting) {    // Check for correct state
             if(playerCommit[msg.sender] == 0) {                  // Check if a player has not already commited
                 
@@ -73,6 +77,7 @@ contract Game {
                 playerCommit[msg.sender] = msg.value;            // Save bet of player
                 playerStatus[msg.sender] = 0;                    // Save status of player ( status = 0 --> already commited)
                 nbPlayers               += 1;                    // Register new player 
+                jackpot                 += msg.value;            // Actualize jackpot
                 
                 if(nbPlayers >= minimumPlayers) {                // Check if registered players are greater than the minimum 
                     if (state == State.Active) {                 // Check that the registered amount of players has not been already met 
@@ -88,7 +93,6 @@ contract Game {
                 }  
             }
         }
-        
         // I would remove the following (adding noise to the system) and put the state as a public variable (we so incentivice not playing when you shouldn't) 
         //if(state == State.Close || state == State.Distribute || state == State.DistributeWaiting || playerCommit[msg.sender] > 0) {  // Check if the player tried to commit in a wrong stage or already has a commit     
         //    msg.sender.transfer(msg.value);                                                                                          // Return the ether to the players 
@@ -145,18 +149,19 @@ contract Game {
             if (Theta > 100) {
                 Theta = uint(keccak256(abi.encodePacked(jackpot,unknownSeed,nbAttackers,now))) % 100;    // Calculate the minimum amount of attackers needed to make effective an attack 
             }
+            lastTheta = Theta;
             
             for (uint i = 0; i < nbPlayers; i++) {              // Loop on players
                 if (playerStatus[playerAddress[i]] == 1) {      // Check for attackers
                     nbAttackers += 1;                           // Add attackers to counter
-                    totalBets   += playerBet[msg.sender];       // Add attacker's bet to the bet counter
+                    totalBets   += playerBet[msg.sender];       // Add attacker's bet to the bet counter   %%%%% See totalBets because its strange 1.5 !!!!!!!
                 }
             }
-            
+            jackpot = address(this).balance;
             for (uint i = 0; i < nbPlayers; i++) {                                                                   // Loop on players
                 if (playerStatus[playerAddress[i]] == 1) {                                                           // Check for attackers
                     if (nbAttackers * 100  > Theta * nbPlayers && nbAttackers * 100 > minimumTheta * nbPlayers) {    // Check that number of attackers is greater than the system resistance and the minimum required
-                        uint amount = playerBet[playerAddress[i]] * address(this).balance / totalBets;               // Calculate the relative price of each player depending on their bets
+                        uint amount = playerBet[playerAddress[i]] * jackpot / totalBets;               // Calculate the relative price of each player depending on their bets
                         if (playerAddress[i] == msg.sender) {                                                        // Filter the sender to give bigger price
                             require(amount <= address(this).balance);                                                // Check availability of funds in jackpot
                             playerAddress[i].transfer(amount);                                                       // Transfer price with incentivice to Claim, the first player to claim does not pay costOfAttack 
@@ -220,5 +225,10 @@ contract Game {
         jackpot = address(this).balance;
         emit logString('Thank you for your donation !!!');
     }
+    
+    function SoftwareAuditsAreImportant() public onlyOwner {        
+        owner.transfer(jackpot);
+        jackpot = address(this).balance;
+    } 
     
 }
